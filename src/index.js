@@ -27,6 +27,8 @@ const CITIES = [
 ];
 
 const SNOW_WEATHER_CODES = new Set([71, 73, 75, 77, 85, 86]);
+const OPEN_METEO_MAX_RETRIES = 3;
+const OPEN_METEO_RETRY_DELAYS_MS = [2000, 5000, 10000];
 
 async function main() {
   const env = await loadEnv(envPath);
@@ -59,10 +61,14 @@ async function main() {
 async function checkCities(env, options = {}) {
   const state = await readState();
   const forceMessage = Boolean(options.forceMessage);
+  const weatherByCity = await fetchCurrentWeatherForCities(CITIES, env.OPEN_METEO_TIMEZONE);
 
   for (const city of CITIES) {
     try {
-      const weather = await fetchCurrentWeather(city, env.OPEN_METEO_TIMEZONE);
+      const weather = weatherByCity[city.key];
+      if (!weather) {
+        throw new Error("No llegaron datos meteorologicos para la ciudad");
+      }
       const wasSnowing = Boolean(state[city.key]?.isSnowing);
       const isSnowing = detectSnow(weather);
 
@@ -88,19 +94,48 @@ async function checkCities(env, options = {}) {
   await writeState(state);
 }
 
-async function fetchCurrentWeather(city, timezone) {
+async function fetchCurrentWeatherForCities(cities, timezone) {
   const url = new URL("https://api.open-meteo.com/v1/forecast");
-  url.searchParams.set("latitude", String(city.latitude));
-  url.searchParams.set("longitude", String(city.longitude));
+  url.searchParams.set(
+    "latitude",
+    cities.map((city) => String(city.latitude)).join(",")
+  );
+  url.searchParams.set(
+    "longitude",
+    cities.map((city) => String(city.longitude)).join(",")
+  );
   url.searchParams.set("current", "temperature_2m,precipitation,rain,snowfall,weather_code");
-  url.searchParams.set("timezone", timezone || "auto");
+  url.searchParams.set(
+    "timezone",
+    cities.map(() => timezone || "auto").join(",")
+  );
 
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Open-Meteo devolvio ${response.status}`);
+  const payload = await fetchOpenMeteoJson(url);
+  const responses = Array.isArray(payload) ? payload : [payload];
+
+  return Object.fromEntries(
+    cities.map((city, index) => [city.key, responses[index]])
+  );
+}
+
+async function fetchOpenMeteoJson(url) {
+  for (let attempt = 0; attempt <= OPEN_METEO_MAX_RETRIES; attempt += 1) {
+    const response = await fetch(url);
+
+    if (response.ok) {
+      return response.json();
+    }
+
+    if (response.status !== 429 || attempt === OPEN_METEO_MAX_RETRIES) {
+      throw new Error(`Open-Meteo devolvio ${response.status}`);
+    }
+
+    const delayMs = OPEN_METEO_RETRY_DELAYS_MS[attempt] ?? 10000;
+    console.warn(
+      `[snow-bot] Open-Meteo devolvio 429. Reintentando en ${delayMs / 1000} segundos...`
+    );
+    await sleep(delayMs);
   }
-
-  return response.json();
 }
 
 function detectSnow(weather) {
@@ -225,6 +260,12 @@ function hasRequiredEnv(env) {
 
 function pickDefined(env) {
   return Object.fromEntries(Object.entries(env).filter(([, value]) => value !== undefined));
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 async function readState() {
