@@ -158,6 +158,18 @@ async function sendTelegramMessage(env, body) {
 }
 
 async function loadEnv(filePath) {
+  const runtimeEnv = {
+    OPEN_METEO_TIMEZONE: process.env.OPEN_METEO_TIMEZONE,
+    CHECK_INTERVAL_MINUTES: process.env.CHECK_INTERVAL_MINUTES,
+    DATA_DIR: process.env.DATA_DIR,
+    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+    TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID
+  };
+
+  if (hasRequiredEnv(runtimeEnv)) {
+    return runtimeEnv;
+  }
+
   try {
     const content = await fs.readFile(filePath, "utf8");
     const pairs = content
@@ -176,10 +188,15 @@ async function loadEnv(filePath) {
       })
       .filter(Boolean);
 
-    return Object.fromEntries(pairs);
+    return {
+      ...Object.fromEntries(pairs),
+      ...pickDefined(runtimeEnv)
+    };
   } catch (error) {
     if (error.code === "ENOENT") {
-      throw new Error("Falta el archivo .env. Copia .env.example a .env y completa tus credenciales.");
+      throw new Error(
+        "Faltan variables de entorno. En local usa .env; en Render cargalas en Environment."
+      );
     }
     throw error;
   }
@@ -200,6 +217,14 @@ function getPositiveInt(value, fallback) {
     return fallback;
   }
   return parsed;
+}
+
+function hasRequiredEnv(env) {
+  return Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID);
+}
+
+function pickDefined(env) {
+  return Object.fromEntries(Object.entries(env).filter(([, value]) => value !== undefined));
 }
 
 async function readState() {
