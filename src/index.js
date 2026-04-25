@@ -39,6 +39,13 @@ async function main() {
   const intervalMinutes = getPositiveInt(env.CHECK_INTERVAL_MINUTES, 15);
   const runOnce = process.argv.includes("--once");
   const forceMessage = process.argv.includes("--force-message");
+  const testMessage = process.argv.includes("--test-message");
+
+  if (testMessage) {
+    await sendTelegramMessage(env, buildTestTelegramMessage());
+    console.log("[snow-bot] Mensaje de prueba enviado por Telegram");
+    return;
+  }
 
   if (runOnce) {
     await checkCities(env, { forceMessage });
@@ -276,6 +283,17 @@ function formatNumber(value) {
 
 function escapeTelegramMarkdown(value) {
   return String(value ?? "").replace(/([_*\[\]()~`>#+\-=|{}.!])/g, "\\$1");
+}
+
+function buildTestTelegramMessage() {
+  const reportTime = escapeTelegramMarkdown(new Date().toISOString());
+
+  return [
+    "🧪 *Mensaje de prueba de SnowBot*",
+    "",
+    "✅ Telegram quedo configurado correctamente",
+    `🕒 Hora: \`${reportTime}\``
+  ].join("\n");
 }
 
 main().catch((error) => {

@@ -65,6 +65,12 @@ Chequeo unico:
 node src/index.js --once
 ```
 
+Mensaje de prueba a Telegram:
+
+```bash
+node src/index.js --test-message
+```
+
 Modo continuo:
 
 ```bash
