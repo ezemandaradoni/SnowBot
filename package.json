@@ -1,0 +1,11 @@
+{
+  "name": "telegram-snow-alert-bot",
+  "version": "1.0.0",
+  "description": "Envia un mensaje de Telegram cuando empieza a nevar en San Martin de los Andes o Bariloche.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node src/index.js --once"
+  }
+}
