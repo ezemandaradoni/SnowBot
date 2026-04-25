@@ -26,9 +26,11 @@ const CITIES = [
   }
 ];
 
-const SNOW_WEATHER_CODES = new Set([71, 73, 75, 77, 85, 86]);
-const OPEN_METEO_MAX_RETRIES = 3;
-const OPEN_METEO_RETRY_DELAYS_MS = [2000, 5000, 10000];
+const WEATHER_API_SNOW_CODES = new Set([
+  1066, 1069, 1114, 1117, 1210, 1213, 1216, 1219, 1222, 1225, 1237, 1255, 1258, 1261, 1264, 1279, 1282
+]);
+const WEATHER_API_MAX_RETRIES = 3;
+const WEATHER_API_RETRY_DELAYS_MS = [2000, 5000, 10000];
 
 async function main() {
   const env = await loadEnv(envPath);
@@ -47,7 +49,7 @@ async function main() {
     `[snow-bot] Monitoreando nieve cada ${intervalMinutes} minutos en ${CITIES.map((city) => city.name).join(", ")}`
   );
 
-  await checkCities(env);
+  await checkCities(env, { forceMessage });
 
   setInterval(async () => {
     try {
@@ -61,14 +63,10 @@ async function main() {
 async function checkCities(env, options = {}) {
   const state = await readState();
   const forceMessage = Boolean(options.forceMessage);
-  const weatherByCity = await fetchCurrentWeatherForCities(CITIES, env.OPEN_METEO_TIMEZONE);
 
   for (const city of CITIES) {
     try {
-      const weather = weatherByCity[city.key];
-      if (!weather) {
-        throw new Error("No llegaron datos meteorologicos para la ciudad");
-      }
+      const weather = await fetchCurrentWeatherForCity(city, env.WEATHER_API_KEY);
       const wasSnowing = Boolean(state[city.key]?.isSnowing);
       const isSnowing = detectSnow(weather);
 
@@ -83,8 +81,8 @@ async function checkCities(env, options = {}) {
       state[city.key] = {
         isSnowing,
         updatedAt: new Date().toISOString(),
-        weatherCode: weather.current.weather_code,
-        temperature: weather.current.temperature_2m
+        weatherCode: weather.current.condition.code,
+        temperature: weather.current.temp_c
       };
     } catch (error) {
       console.error(`[snow-bot] Fallo el procesamiento de ${city.name}:`, error.message);
@@ -94,45 +92,31 @@ async function checkCities(env, options = {}) {
   await writeState(state);
 }
 
-async function fetchCurrentWeatherForCities(cities, timezone) {
-  const url = new URL("https://api.open-meteo.com/v1/forecast");
-  url.searchParams.set(
-    "latitude",
-    cities.map((city) => String(city.latitude)).join(",")
-  );
-  url.searchParams.set(
-    "longitude",
-    cities.map((city) => String(city.longitude)).join(",")
-  );
-  url.searchParams.set("current", "temperature_2m,precipitation,rain,snowfall,weather_code");
-  url.searchParams.set(
-    "timezone",
-    cities.map(() => timezone || "auto").join(",")
-  );
+async function fetchCurrentWeatherForCity(city, apiKey) {
+  const url = new URL("https://api.weatherapi.com/v1/current.json");
+  url.searchParams.set("key", apiKey);
+  url.searchParams.set("q", `${city.latitude},${city.longitude}`);
+  url.searchParams.set("aqi", "no");
 
-  const payload = await fetchOpenMeteoJson(url);
-  const responses = Array.isArray(payload) ? payload : [payload];
-
-  return Object.fromEntries(
-    cities.map((city, index) => [city.key, responses[index]])
-  );
+  return fetchWeatherApiJson(url);
 }
 
-async function fetchOpenMeteoJson(url) {
-  for (let attempt = 0; attempt <= OPEN_METEO_MAX_RETRIES; attempt += 1) {
+async function fetchWeatherApiJson(url) {
+  for (let attempt = 0; attempt <= WEATHER_API_MAX_RETRIES; attempt += 1) {
     const response = await fetch(url);
 
     if (response.ok) {
       return response.json();
     }
 
-    if (response.status !== 429 || attempt === OPEN_METEO_MAX_RETRIES) {
-      throw new Error(`Open-Meteo devolvio ${response.status}`);
+    if (response.status !== 429 || attempt === WEATHER_API_MAX_RETRIES) {
+      const text = await response.text();
+      throw new Error(`WeatherAPI devolvio ${response.status}: ${text}`);
     }
 
-    const delayMs = OPEN_METEO_RETRY_DELAYS_MS[attempt] ?? 10000;
+    const delayMs = WEATHER_API_RETRY_DELAYS_MS[attempt] ?? 10000;
     console.warn(
-      `[snow-bot] Open-Meteo devolvio 429. Reintentando en ${delayMs / 1000} segundos...`
+      `[snow-bot] WeatherAPI devolvio 429. Reintentando en ${delayMs / 1000} segundos...`
     );
     await sleep(delayMs);
   }
@@ -140,25 +124,25 @@ async function fetchOpenMeteoJson(url) {
 
 function detectSnow(weather) {
   const current = weather.current ?? {};
-  const snowfall = Number(current.snowfall ?? 0);
-  const weatherCode = Number(current.weather_code);
-  return snowfall > 0 || SNOW_WEATHER_CODES.has(weatherCode);
+  const weatherCode = Number(current.condition?.code);
+  const conditionText = String(current.condition?.text ?? "").toLowerCase();
+  return WEATHER_API_SNOW_CODES.has(weatherCode) || conditionText.includes("snow");
 }
 
 function buildSnowMessage(city, weather) {
   const current = weather.current;
-  const temperature = escapeTelegramMarkdown(formatNumber(current.temperature_2m));
-  const snowfall = escapeTelegramMarkdown(formatNumber(current.snowfall));
-  const precipitation = escapeTelegramMarkdown(formatNumber(current.precipitation));
+  const temperature = escapeTelegramMarkdown(formatNumber(current.temp_c));
+  const conditionText = escapeTelegramMarkdown(current.condition?.text ?? "Sin detalle");
+  const humidity = escapeTelegramMarkdown(String(current.humidity ?? ""));
   const cityName = escapeTelegramMarkdown(city.name);
-  const reportTime = escapeTelegramMarkdown(current.time);
+  const reportTime = escapeTelegramMarkdown(weather.location?.localtime ?? new Date().toISOString());
 
   return [
     `❄️ *Nieve detectada en ${cityName}*`,
     "",
     `🌡️ Temperatura: *${temperature} C*`,
-    `🌨️ Nieve actual: *${snowfall} mm*`,
-    `💧 Precipitacion actual: *${precipitation} mm*`,
+    `🌨️ Condicion: *${conditionText}*`,
+    `💧 Humedad: *${humidity}%*`,
     `🕒 Hora del reporte: \`${reportTime}\``
   ].join("\n");
 }
@@ -166,7 +150,7 @@ function buildSnowMessage(city, weather) {
 function logWeather(city, weather, isSnowing) {
   const current = weather.current;
   console.log(
-    `[snow-bot] ${city.name}: code=${current.weather_code}, temp=${current.temperature_2m}C, snowfall=${current.snowfall}, snowing=${isSnowing}`
+    `[snow-bot] ${city.name}: code=${current.condition?.code}, temp=${current.temp_c}C, condition=${current.condition?.text}, snowing=${isSnowing}`
   );
 }
 
@@ -194,9 +178,9 @@ async function sendTelegramMessage(env, body) {
 
 async function loadEnv(filePath) {
   const runtimeEnv = {
-    OPEN_METEO_TIMEZONE: process.env.OPEN_METEO_TIMEZONE,
     CHECK_INTERVAL_MINUTES: process.env.CHECK_INTERVAL_MINUTES,
     DATA_DIR: process.env.DATA_DIR,
+    WEATHER_API_KEY: process.env.WEATHER_API_KEY,
     TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID
   };
@@ -238,11 +222,11 @@ async function loadEnv(filePath) {
 }
 
 function validateEnv(env) {
-  const required = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"];
-
+  const required = ["WEATHER_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"];
   const missing = required.filter((key) => !env[key]);
+
   if (missing.length > 0) {
-    throw new Error(`Faltan variables en .env: ${missing.join(", ")}`);
+    throw new Error(`Faltan variables de entorno: ${missing.join(", ")}`);
   }
 }
 
@@ -255,7 +239,7 @@ function getPositiveInt(value, fallback) {
 }
 
 function hasRequiredEnv(env) {
-  return Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID);
+  return Boolean(env.WEATHER_API_KEY && env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID);
 }
 
 function pickDefined(env) {

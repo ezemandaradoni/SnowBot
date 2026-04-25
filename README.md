@@ -20,8 +20,8 @@ Ejemplo de alerta:
 
 ## Como funciona
 
-1. Consulta el clima actual en Open-Meteo.
-2. Revisa `snowfall` y `weather_code`.
+1. Consulta el clima actual en WeatherAPI.
+2. Revisa la condicion actual y el codigo meteorologico.
 3. Si una ciudad pasa de "sin nieve" a "con nieve", envia un mensaje por Telegram.
 4. Guarda el ultimo estado en `data/state.json`.
 
@@ -29,6 +29,7 @@ Ejemplo de alerta:
 
 - Node.js 18 o superior
 - Un bot de Telegram
+- Una API key de WeatherAPI
 
 ## Configuracion
 
@@ -36,10 +37,10 @@ Ejemplo de alerta:
 2. Completa tus credenciales:
 
 ```env
-OPEN_METEO_TIMEZONE=America/Argentina/Buenos_Aires
 CHECK_INTERVAL_MINUTES=15
 DATA_DIR=./data
 
+WEATHER_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TELEGRAM_BOT_TOKEN=123456789:AAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TELEGRAM_CHAT_ID=123456789
 ```
@@ -85,6 +86,7 @@ El repo ya incluye [render.yaml](C:/Users/Ezequiel/Documents/New%20project/rende
 5. Completa las variables secretas:
 
 ```env
+WEATHER_API_KEY=tu_weather_api_key
 TELEGRAM_BOT_TOKEN=tu_token
 TELEGRAM_CHAT_ID=tu_chat_id
 ```
